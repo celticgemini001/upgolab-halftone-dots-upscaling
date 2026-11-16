@@ -123,7 +123,7 @@ snippet at the bottom.</p>
 <h2>The lattice frequency scales exactly with the scale factor</h2>
 
 <p>This is the part that works. Screen a flat 50% patch, upscale it with Lanczos, and locate
-the dominant radial frequency of the result by FFT peak. The prediction is that the dot pitch
+the dominant radial frequency of the result by FFT peak. The prediction is that the <a href="https://celticgemini001.github.io/upgolab-upscale-anime-illustration/">dot pitch</a>
 in output pixels is simply <code>p × F</code>, so the frequency is <code>1/(p·F)</code>.
 Fifteen cases:</p>
 
@@ -200,7 +200,7 @@ and it is an order of magnitude smaller than the fractional-factor error above.<
 can separate them from detail. The standard method is a Gaussian low-pass sized to the pitch.
 So the question is not "does it work" but "what does it cost", and to answer that I need a
 feature with a known answer. A step edge from tone 0.10 to 0.90 has a 10–90% transition
-width of exactly 1 pixel. Screen it, descreen it, upscale 2×, measure the transition in
+width of exactly 1 pixel. Screen it, <a href="https://celticgemini001.github.io/upgolab-jpeg-blocking-upscale/">descreen</a> it, upscale 2×, measure the transition in
 source-equivalent pixels:</p>
 
 <table>
@@ -361,7 +361,7 @@ building. If the delivery width puts it below 2 px per cell, the dots will vanis
 and you should do nothing — no descreen, no special kernel. If it lands at 2–4 px per cell the
 dots will be visible and soft; that is the case where σ = p/2 descreening is worth its
 1.28× edge cost. Above about 6 px per cell you are looking at a coarse screen that no filter
-recovers, and the honest move is to rescan or reshoot rather than to filter.</p>
+recovers, and the honest move is to <a href="https://celticgemini001.github.io/upgolab-upscale-vs-reshoot/">rescan or reshoot</a> rather than to filter.</p>
 </div>
 
 <h2>What I could not measure, and one number I got wrong</h2>
@@ -440,7 +440,8 @@ difference is worth knowing about before you extrapolate any of the numbers abov
 photograph — one resampling already in the chain, text instead of tone — that is a different
 problem with a different measurement, and the one behind <a href="https://upgolab.com">UpgoLAB's
 upscaling work</a> covers it.</p>
-
+</article>
+<footer>
 <nav class="sisternav" aria-label="More measured upscaling guides">
 <p>More measured guides</p>
 <ul>
