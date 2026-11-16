@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Halftone Dots Under Upscaling: The Dot Lattice Scales Exactly, and Descreening Costs You 1.1–1.3× the Pitch</title>
+<meta name="description" content="A screened print carries a dot lattice at a fixed pitch. Measured across 5 pitches and 4 resamplers: the lattice frequency scales to within 0.56%, nearest-neighbour bloats fractional factors by 3.2×, and killing the dots needs a filter that blurs an edge to 1.1–1.3× the dot pitch.">
+<link rel="canonical" href="https://celticgemini001.github.io/upgolab-halftone-dots-upscaling/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Halftone Dots Under Upscaling: The Lattice Scales, the Detail Doesn't">
+<meta property="og:description" content="Measured: dot pitch scales exactly with the scale factor, fractional factors expose nearest-neighbour by 3.2×, and descreening to kill the dots blurs a known edge to 1.1–1.3× the dot pitch.">
+<script type="application/ld+json">
+{"@type":"Article",
+ "@context":"https://schema.org",
+ "headline":"Halftone Dots Under Upscaling: The Dot Lattice Scales Exactly, and Descreening Costs You 1.1–1.3× the Pitch",
+ "author":{"@type":"Person","name":"UpgoLAB"},
+ "publisher":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
+ "description":"Measured halftone screen behaviour under upscaling: lattice frequency scales within 0.56%, nearest-neighbour nearest-factor clumping 3.2x, descreen filter cost 1.1-1.3x dot pitch of edge blur.",
+ "datePublished":"2026-11-16"}
+</script>
+<style>
+:root{--ink:#16181d;--mut:#5b6270;--line:#e2e5ea;--acc:#0a58ca;--bg:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+ font:17px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:48rem;margin:0 auto;padding:3rem 1.25rem 5rem}
+h1{font-size:2.05rem;line-height:1.22;margin:0 0 .7rem;letter-spacing:-.02em}
+h2{font-size:1.28rem;margin:2.8rem 0 .9rem;letter-spacing:-.01em}
+h3{font-size:1.05rem;margin:1.9rem 0 .5rem}
+p,li{color:#2b3038}
+a{color:var(--acc)}
+.lede{font-size:1.1rem;color:var(--mut);margin:0 0 1.6rem}
+.meta{font-size:.86rem;color:var(--mut);border-left:2px solid var(--line);
+ padding-left:.9rem;margin:0 0 2.2rem;line-height:1.6}
+table{width:100%;border-collapse:collapse;margin:1.3rem 0;font-size:.9rem}
+th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--line)}
+th{font-weight:600;background:#f6f7f9;font-size:.8rem;text-transform:uppercase;
+ letter-spacing:.03em;color:var(--mut)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+code{background:#f2f5fa;padding:.1rem .3rem;border-radius:4px;
+ font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em}
+pre{background:#f6f7f9;border:1px solid var(--line);border-radius:6px;
+ padding:.9rem 1rem;overflow-x:auto;font-size:.8rem;line-height:1.5;margin:1.3rem 0}
+pre code{background:none;padding:0;font-size:1em}
+.callout{border-left:3px solid var(--acc);background:#f5f8fd;padding:.85rem 1.05rem;
+ margin:1.7rem 0;border-radius:0 6px 6px 0}
+.callout.warn{border-left-color:#b45309;background:#fdf7ed}
+.callout p{margin:.3rem 0}
+footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);
+ font-size:.84rem;color:var(--mut)}
+.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid var(--line)}
+.sisternav p{font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;
+ color:var(--mut);margin:0 0 .6rem}
+.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
+.sisternav li{margin:0;font-size:.86rem;line-height:1.4}
+.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
+.sisternav a:hover{border-bottom-color:var(--acc)}
+</style>
+</head>
+<body>
+<main>
+<article>
+<h1>Halftone Dots Under Upscaling: The Lattice Scales, the Detail Doesn't</h1>
+
+<p class="lede">A photographed magazine page is not a photograph of a scene — it is a
+photograph of a <em>grid</em>. That grid has a hard, knowable pitch, and unlike almost
+everything else in upscaling it behaves predictably: across five pitches and three scale
+factors, the measured lattice frequency tracks <code>1/(p·F)</code> to within
+<strong>0.56%</strong>. What does <em>not</em> behave predictably is everything layered on
+top, and the reason is worth a number. Killing the dots with a pre-filter costs an edge
+blur equal to <strong>1.1–1.3× the dot pitch</strong>, measured at all four pitches.</p>
+
+<p class="meta">numpy 1.26.4 · Pillow 12.2.0 · screens synthesised as AM clustered-dot on a
+45° lattice so that ground truth is exact, then the same pipeline run on three distinct
+source photographs (1080×1620) cropped to 512×512 detailed regions · tone calibration,
+envelope roughness and edge width each defined below before being used · five experiments,
+including the one where my own screen model turned out to be wrong by 51 levels.</p>
+
+<h2>The screen model, and the correction it needed</h2>
+
+<p>Offset printing cannot deposit continuous tone. It prints a lattice of dots at a fixed
+pitch <em>p</em> and varies their size. At 150 lines per inch scanned at 300 dots per inch,
+<em>p</em> = 2 pixels. At 100 lpi on the same scan it is 3; a 300 ppi scan of a coarse
+newspaper screen can land at 6 or 8. The tone of a patch is the <em>area fraction</em> of
+ink, so the obvious model is a circle whose area matches:</p>
+
+<pre><code>area = tone * p^2   ->   r = p * sqrt(tone / pi)</code></pre>
+
+<p>That formula is right for isolated dots and wrong for a print. I measured it before
+trusting it, by screening flat patches of known tone and reading back the mean level:</p>
+
+<table>
+<thead><tr><th>Pitch p</th><th class="num">tone 0.10 asked</th><th class="num">printed</th>
+<th class="num">tone 0.50 asked</th><th class="num">printed</th>
+<th class="num">tone 0.90 asked</th><th class="num">printed</th></tr></thead>
+<tbody>
+<tr><td>2 px</td><td class="num">25.5</td><td class="num">61.2</td><td class="num">127.5</td><td class="num">132.4</td><td class="num">229.5</td><td class="num">178.5</td></tr>
+<tr><td>3 px</td><td class="num">25.5</td><td class="num">46.9</td><td class="num">127.5</td><td class="num">132.8</td><td class="num">229.5</td><td class="num">191.1</td></tr>
+<tr><td>4 px</td><td class="num">25.5</td><td class="num">39.2</td><td class="num">127.5</td><td class="num">132.6</td><td class="num">229.5</td><td class="num">198.9</td></tr>
+<tr><td>6 px</td><td class="num">25.5</td><td class="num">32.3</td><td class="num">127.5</td><td class="num">131.4</td><td class="num">229.5</td><td class="num">207.4</td></tr>
+<tr><td>8 px</td><td class="num">25.5</td><td class="num">29.6</td><td class="num">127.5</td><td class="num">130.4</td><td class="num">229.5</td><td class="num">211.6</td></tr>
+</tbody>
+</table>
+
+<p>Above roughly 50% coverage the circles on a fixed lattice start to overlap, and the
+<em>union</em> of overlapping circles is smaller than the sum of their areas. So printed ink
+falls below the requested tone: a 0.90 patch printed as 0.70 at p = 2, an error of
+<strong>−51 levels</strong>. Below 50% the error runs the other way, because a one-pixel dot
+cannot be made smaller than a pixel. This is exactly what a real raster image processor
+compensates for, and any measurement of "how badly did upscaling damage the tone" built on
+the naive radius would have been measuring my own screen instead of the resampler. The
+version used below bisects on radius until the rendered mean matches the target; after
+calibration every patch reproduces its requested tone to within <strong>0.45 levels</strong>
+across all five pitches.</p>
+
+<div class="callout warn">
+<p><strong>Worth stating plainly:</strong> the first draft of this page quoted dot pitches
+and tone errors from the uncalibrated model. Every number in the tables below comes from
+the calibrated one. The calibration is 28 bisection steps per pitch, and it is in the
+snippet at the bottom.</p>
+</div>
+
+<h2>The lattice frequency scales exactly with the scale factor</h2>
+
+<p>This is the part that works. Screen a flat 50% patch, upscale it with Lanczos, and locate
+the dominant radial frequency of the result by FFT peak. The prediction is that the dot pitch
+in output pixels is simply <code>p × F</code>, so the frequency is <code>1/(p·F)</code>.
+Fifteen cases:</p>
+
+<table>
+<thead><tr><th>Pitch p</th><th class="num">Scale F</th><th class="num">f measured</th>
+<th class="num">1/(p·F)</th><th class="num">Error</th><th class="num">Pitch out (px)</th></tr></thead>
+<tbody>
+<tr><td>2</td><td class="num">2</td><td class="num">0.2504</td><td class="num">0.2500</td><td class="num">+0.17%</td><td class="num">3.99</td></tr>
+<tr><td>2</td><td class="num">4</td><td class="num">0.1252</td><td class="num">0.1250</td><td class="num">+0.17%</td><td class="num">7.99</td></tr>
+<tr><td>3</td><td class="num">2</td><td class="num">0.1676</td><td class="num">0.1667</td><td class="num">+0.54%</td><td class="num">5.97</td></tr>
+<tr><td>3</td><td class="num">4</td><td class="num">0.0838</td><td class="num">0.0833</td><td class="num">+0.54%</td><td class="num">11.94</td></tr>
+<tr><td>4</td><td class="num">2</td><td class="num">0.1252</td><td class="num">0.1250</td><td class="num">+0.17%</td><td class="num">7.99</td></tr>
+<tr><td>4</td><td class="num">4</td><td class="num">0.0626</td><td class="num">0.0625</td><td class="num">+0.17%</td><td class="num">15.97</td></tr>
+<tr><td>6</td><td class="num">2</td><td class="num">0.0829</td><td class="num">0.0833</td><td class="num">&minus;0.56%</td><td class="num">12.07</td></tr>
+<tr><td>6</td><td class="num">4</td><td class="num">0.0414</td><td class="num">0.0417</td><td class="num">&minus;0.56%</td><td class="num">24.14</td></tr>
+<tr><td>8</td><td class="num">2</td><td class="num">0.0626</td><td class="num">0.0625</td><td class="num">+0.17%</td><td class="num">15.97</td></tr>
+<tr><td>8</td><td class="num">4</td><td class="num">0.0313</td><td class="num">0.0312</td><td class="num">+0.17%</td><td class="num">31.94</td></tr>
+</tbody>
+</table>
+
+<p>The error is not noise around zero — it is <em>systematic per pitch</em>. All three scale
+factors of p = 3 show exactly +0.54%; all three of p = 6 show exactly −0.56%. That is the
+FFT bin quantisation: the measured peak can only land on a discrete frequency bin, and the
+offset is the distance from <code>1/(p·F)</code> to the nearest bin, divided by that
+frequency. It is a property of the measurement, not of the resampler, and it is why the
+match is this tight. What the table establishes is narrower and still useful: the upscale
+does not shift, bend or duplicate the lattice. It multiplies the pitch by F and nothing else.</p>
+
+<div class="callout">
+<p><strong>Practical consequence:</strong> if you know <em>p</em> in the original scan, you
+know the dot pitch in the output before you process a single pixel — it is <code>p × F</code>.
+That number decides whether the dots will be visible on screen, which is the last section.</p>
+</div>
+
+<h2>What resampling does break: fractional factors</h2>
+
+<p>The frequency survives; the <em>envelope</em> does not always. To measure clumping I
+average the output over three dot cells, which cancels the dots themselves, and then ask how
+much the local mean still moves. A perfect screen on flat grey gives zero. Anything non-zero
+is structure the screen never contained. Flat 50% grey, two pitches, four kernels:</p>
+
+<table>
+<thead><tr><th>p</th><th class="num">F</th><th class="num">nearest</th>
+<th class="num">bilinear</th><th class="num">bicubic</th><th class="num">lanczos</th></tr></thead>
+<tbody>
+<tr><td>3</td><td class="num">1.5</td><td class="num">2.98%</td><td class="num">0.92%</td><td class="num">1.00%</td><td class="num">1.02%</td></tr>
+<tr><td>3</td><td class="num">2.0</td><td class="num">1.14%</td><td class="num">0.98%</td><td class="num">1.16%</td><td class="num">1.23%</td></tr>
+<tr><td>3</td><td class="num">2.5</td><td class="num">1.77%</td><td class="num">0.94%</td><td class="num">1.08%</td><td class="num">1.14%</td></tr>
+<tr><td>3</td><td class="num">3.0</td><td class="num">1.00%</td><td class="num">0.93%</td><td class="num">1.04%</td><td class="num">1.10%</td></tr>
+<tr><td>6</td><td class="num">1.5</td><td class="num">1.30%</td><td class="num">1.20%</td><td class="num">1.29%</td><td class="num">1.30%</td></tr>
+<tr><td>6</td><td class="num">2.0</td><td class="num">1.45%</td><td class="num">1.37%</td><td class="num">1.50%</td><td class="num">1.51%</td></tr>
+<tr><td>6</td><td class="num">4.0</td><td class="num">1.33%</td><td class="num">1.29%</td><td class="num">1.40%</td><td class="num">1.42%</td></tr>
+</tbody>
+</table>
+
+<p>The interesting cell is p = 3, F = 1.5. Nearest-neighbour scores <strong>2.98%</strong>
+against bilinear's 0.92% — <strong>3.2× worse</strong>, and the worst value in the table.
+At F = 2, the same kernel scores 1.14% and is unremarkable. The difference is not the kernel
+being bad in general; it is that a non-integer factor has no consistent pixel to copy. Dot
+centres land between source pixels, so each output dot is assembled from a different subset
+of source samples, and their areas come out uneven. At integer factors every dot gets the
+same treatment and the unevenness vanishes.</p>
+
+<p>The second pattern is that bilinear is consistently the <em>least</em> clumpy kernel at
+soft pitches, and Lanczos consistently the most — by 0.08 to 0.11 percentage points. That is
+the small, honest size of the effect. An interpolator with negative lobes rings around each
+dot edge, and the ring is what shows up as envelope structure. It is real, it is reproducible,
+and it is an order of magnitude smaller than the fractional-factor error above.</p>
+
+<h2>Descreening: the price is about 1.2× the dot pitch</h2>
+
+<p>If you are going to upscale a screened image and want the dots gone, you must remove them
+<em>before</em> the upscale — afterwards they are baked in at <code>p×F</code> and no filter
+can separate them from detail. The standard method is a Gaussian low-pass sized to the pitch.
+So the question is not "does it work" but "what does it cost", and to answer that I need a
+feature with a known answer. A step edge from tone 0.10 to 0.90 has a 10–90% transition
+width of exactly 1 pixel. Screen it, descreen it, upscale 2×, measure the transition in
+source-equivalent pixels:</p>
+
+<table>
+<thead><tr><th>p</th><th class="num">σ = 0 (raw)</th><th class="num">σ = 0.5</th>
+<th class="num">σ = 1.0</th><th class="num">σ = 1.5</th><th class="num">σ = 2.0</th>
+<th class="num">σ = 3.0</th></tr></thead>
+<tbody>
+<tr><td>2 px</td><td class="num">0.52</td><td class="num">1.70</td><td class="num">2.57</td><td class="num">3.57</td><td class="num">4.55</td><td class="num">7.57</td></tr>
+<tr><td>3 px</td><td class="num">0.49</td><td class="num">0.40</td><td class="num">2.40</td><td class="num">3.37</td><td class="num">4.40</td><td class="num">7.44</td></tr>
+<tr><td>4 px</td><td class="num">0.68</td><td class="num">0.55</td><td class="num">2.35</td><td class="num">3.44</td><td class="num">4.45</td><td class="num">7.41</td></tr>
+<tr><td>6 px</td><td class="num">0.33</td><td class="num">1.38</td><td class="num">2.39</td><td class="num">3.44</td><td class="num">4.52</td><td class="num">7.57</td></tr>
+</tbody>
+</table>
+
+<p>Edge width in source pixels, before any descreening, is 0.33–0.68 px — <em>narrower</em>
+than the unscreened 1.00 px, because the dot at the step boundary either covers the transition
+or does not, and the 10–90% crossing collapses onto a single output pair. That is a
+measurement artefact of the crossing definition and I am flagging it rather than smoothing it
+over: at σ = 0 the number is not comparable to the others.</p>
+
+<p>From σ = 1 upward the behaviour is clean and, more usefully, largely independent of pitch.
+At σ = 1.0 all four pitches land in 2.35–2.57 px. At σ = 2.0 they land in 4.40–4.55. At
+σ = 3.0 they land in 7.41–7.57. The width is a function of σ and essentially not of p, which
+fits the model: a Gaussian of σ blurred against a step gives a 10–90% width of
+approximately <code>2.56σ</code>, and 2.56 × 1.0 = 2.56 against a measured median of 2.48;
+2.56 × 2.0 = 5.12 against 4.50; 2.56 × 3.0 = 7.68 against 7.51. Close, and slightly
+over-predicting at the large σ where the upscale's own kernel contributes.</p>
+
+<p>Now the other half: how much σ is <em>needed</em> to kill the dots? Dot contrast on a flat
+patch, same runs:</p>
+
+<table>
+<thead><tr><th>p</th><th class="num">σ = 0</th><th class="num">σ = 0.5</th>
+<th class="num">σ = 1.0</th><th class="num">σ = 1.5</th><th class="num">σ = 2.0</th>
+<th class="num">σ = 3.0</th></tr></thead>
+<tbody>
+<tr><td>2 px</td><td class="num">52.4</td><td class="num">29.1</td><td class="num">4.9</td><td class="num">3.5</td><td class="num">2.9</td><td class="num">1.9</td></tr>
+<tr><td>3 px</td><td class="num">69.4</td><td class="num">53.2</td><td class="num">11.5</td><td class="num">2.6</td><td class="num">2.1</td><td class="num">1.9</td></tr>
+<tr><td>4 px</td><td class="num">80.2</td><td class="num">68.2</td><td class="num">32.2</td><td class="num">7.5</td><td class="num">2.0</td><td class="num">1.8</td></tr>
+<tr><td>6 px</td><td class="num">95.7</td><td class="num">86.8</td><td class="num">62.2</td><td class="num">36.7</td><td class="num">14.8</td><td class="num">2.5</td></tr>
+</tbody>
+</table>
+
+<p>The dots reach a floor of 1.9–2.5 levels — that is residual, not signal — at a σ that
+scales almost exactly with pitch: <strong>σ ≈ p/2</strong>. For p = 2 that is σ = 1.0 (4.9,
+essentially floor). p = 3 needs σ = 1.5 (2.6). p = 4 needs σ = 2.0 (2.0). p = 6 needs
+σ = 3.0 (2.5). Four pitches, one rule, no fitting.</p>
+
+<div class="callout">
+<p><strong>The trade, assembled from the two tables.</strong> The σ you need is p/2. Measured
+edge width at that σ, in source pixels: <strong>2.57 at p = 2, 3.37 at p = 3, 4.45 at p = 4,
+7.57 at p = 6</strong>. Divided by the pitch that is 1.28, 1.12, 1.11 and 1.26 — so the rule is
+"about 1.2× the pitch", not a constant, and the two fine pitches bracket the coarse ones rather
+than the relationship being tight. Against a clean edge's 1.00 px the extra blur is 1.57 px at
+p = 2 and 6.57 px at p = 6, i.e. 0.79p to 1.10p of added smear. That is the number to weigh:
+a 6-pixel screen loses more than six pixels of edge definition to remove a texture you would
+have had to rescan to fix properly.</p>
+</div>
+
+<h2>On real photographs the kernel choice mostly stops mattering</h2>
+
+<p>Synthetic patches establish the mechanism. The question a person actually has is what
+happens to a picture. Three distinct 1080×1620 sources, cropped to 512×512 detailed
+regions, screened at three pitches, upscaled 2×, and scored three ways: tone error in levels
+(local mean against the unscreened reference), dot texture (RMS above a 2-cell high-pass),
+and structure kept (gradient energy relative to the unscreened 2×).</p>
+
+<table>
+<thead><tr><th>Source · p</th><th>Kernel</th><th>Pre-filter</th>
+<th class="num">Tone err</th><th class="num">Dot texture</th><th class="num">Structure</th></tr></thead>
+<tbody>
+<tr><td>true-texture · 4</td><td>bilinear</td><td>none</td><td class="num">18.11</td><td class="num">54.3</td><td class="num">152.6%</td></tr>
+<tr><td>true-texture · 4</td><td>bilinear</td><td>descreen</td><td class="num">16.02</td><td class="num">6.7</td><td class="num">50.5%</td></tr>
+<tr><td>true-texture · 4</td><td>lanczos</td><td>none</td><td class="num">19.23</td><td class="num">69.3</td><td class="num">186.5%</td></tr>
+<tr><td>true-texture · 4</td><td>lanczos</td><td>descreen</td><td class="num">16.04</td><td class="num">8.4</td><td class="num">52.8%</td></tr>
+<tr><td>cinema-vivid · 3</td><td>bilinear</td><td>none</td><td class="num">23.99</td><td class="num">41.7</td><td class="num">81.7%</td></tr>
+<tr><td>cinema-vivid · 3</td><td>bilinear</td><td>descreen</td><td class="num">22.10</td><td class="num">5.8</td><td class="num">47.2%</td></tr>
+<tr><td>cinema-vivid · 3</td><td>lanczos</td><td>none</td><td class="num">25.32</td><td class="num">61.8</td><td class="num">109.6%</td></tr>
+<tr><td>cinema-vivid · 3</td><td>lanczos</td><td>descreen</td><td class="num">22.11</td><td class="num">8.3</td><td class="num">48.9%</td></tr>
+<tr><td>clear-reality · 2</td><td>bilinear</td><td>none</td><td class="num">31.98</td><td class="num">22.4</td><td class="num">78.5%</td></tr>
+<tr><td>clear-reality · 2</td><td>bilinear</td><td>descreen</td><td class="num">31.41</td><td class="num">6.9</td><td class="num">54.8%</td></tr>
+<tr><td>clear-reality · 2</td><td>lanczos</td><td>none</td><td class="num">31.99</td><td class="num">43.4</td><td class="num">114.4%</td></tr>
+<tr><td>clear-reality · 2</td><td>lanczos</td><td>descreen</td><td class="num">31.38</td><td class="num">10.3</td><td class="num">62.4%</td></tr>
+</tbody>
+</table>
+
+<p>Three things are visible, and two of them were not what I expected.</p>
+
+<p><strong>Dot texture is worse with Lanczos in 18 of 18 pairs, and tone in 14 of 18.</strong>
+The texture result is unanimous and large: 43.4 against 22.4, 61.8 against 41.7, 69.3 against
+54.3. The tone result is not unanimous — on clear-reality the two kernels are within 0.03
+levels of each other, sometimes Lanczos lower, and calling that a win either way would be
+reading noise. The reason the texture always loses is the negative lobes: a sharp kernel rings
+around each dot, and the ring lands above the 2-cell high-pass as manufactured detail. On
+clean photographs Lanczos wins and everyone recommends it; on screened photographs the
+recommendation inverts, and it inverts in the metric that matters for a print.</p>
+
+<p><strong>Structure above 100% is not a success.</strong> Bilinear raw scores 152.6% on the
+true-texture crop. That does not mean it recovered 50% more detail than the print-free
+original; it means it manufactured gradient energy, and the manufactured energy is the moire
+beat between the dot lattice and the sample grid. Anything above ~100% in this column should
+be read as contamination.</p>
+
+<p><strong>After descreening the kernel choice is worth almost nothing.</strong> At p = 4 on
+true-texture: 16.02 against 16.04 levels of tone error, 50.5% against 52.8% structure. That is
+<strong>0.02 levels</strong> and <strong>2.3 percentage points</strong> — well inside any
+threshold that matters visually. The same collapse happens on all three sources. Once the dot
+lattice is gone, the input to the resampler is an ordinary soft image, and the kernel question
+reverts to the one already answered elsewhere in this cluster.</p>
+
+<p>The cost is in the structure column, and it is large. Descreening takes a 512×512 crop from
+152.6% down to 50.5% on the most detailed source — roughly two-thirds of the surviving
+gradient energy, and the reference is only 100%, so some of what was lost was the moire
+itself. On clear-reality, the softest source, the drop is 78.5% to 54.8%, a third. The
+pattern is consistent with the edge result: descreening removes a fixed spatial band anchored
+on <em>p</em>, so a detailed image loses more of what it had.</p>
+
+<h2>When the dots stop existing: 2 pixels per cell</h2>
+
+<p>The practical question is whether the dots will be visible after the image is placed on a
+page. Take a 2×-upscaled screened master and downscale it to a range of display widths,
+measuring the lattice frequency, the envelope roughness, and the dot contrast:</p>
+
+<table>
+<thead><tr><th>p</th><th class="num">Width</th><th class="num">Dot pitch (px)</th>
+<th class="num">Dot contrast</th><th class="num">Envelope</th></tr></thead>
+<tbody>
+<tr><td>2</td><td class="num">2400</td><td class="num">4.00</td><td class="num">45.2</td><td class="num">1.66%</td></tr>
+<tr><td>2</td><td class="num">1200</td><td class="num">2.00</td><td class="num">39.2</td><td class="num">1.63%</td></tr>
+<tr><td>2</td><td class="num">800</td><td class="num">1.50</td><td class="num">10.5</td><td class="num">1.43%</td></tr>
+<tr><td>2</td><td class="num">400</td><td class="num">3.87</td><td class="num">3.4</td><td class="num">0.10%</td></tr>
+<tr><td>3</td><td class="num">1200</td><td class="num">3.00</td><td class="num">69.4</td><td class="num">0.73%</td></tr>
+<tr><td>3</td><td class="num">800</td><td class="num">2.00</td><td class="num">57.2</td><td class="num">1.28%</td></tr>
+<tr><td>3</td><td class="num">400</td><td class="num">4.10</td><td class="num">1.8</td><td class="num">0.10%</td></tr>
+<tr><td>6</td><td class="num">1200</td><td class="num">6.02</td><td class="num">93.0</td><td class="num">1.36%</td></tr>
+<tr><td>6</td><td class="num">800</td><td class="num">4.01</td><td class="num">86.6</td><td class="num">1.46%</td></tr>
+<tr><td>6</td><td class="num">400</td><td class="num">2.01</td><td class="num">71.5</td><td class="num">1.55%</td></tr>
+</tbody>
+</table>
+
+<p>Read the contrast column against the pitch column and the threshold is unambiguous. At
+<strong>2.00 px</strong> per cell or more, dots survive at full contrast: 39.2, 57.2, 71.5,
+86.6, 93.0. At <strong>1.50 px</strong> per cell they are already dying: 10.5. Below that
+they are gone, and the "pitch" values of 3.87 and 4.10 at width 400 are aliases — the real
+lattice has folded past Nyquist and the FFT is reporting the folded frequency, not a
+surviving dot structure. Contrast has collapsed to 3.4 and 1.8, which is flat grey.</p>
+
+<p>So the rule is Nyquist, as it should be: a dot lattice needs <strong>two output pixels per
+cell</strong> to exist. Below that it does not get blurred, it stops being resolvable, and a
+Lanczos downscale turns it into a uniform tone. That is the free version of descreening, and
+it is the one to prefer — it costs nothing in structure because the structure is being thrown
+away at frequencies no one can see at that display size anyway.</p>
+
+<div class="callout">
+<p><strong>Putting the three results together.</strong> You have one question to answer and it
+has a cheap answer. Compute the output dot pitch, <code>p × F</code>, for the master you are
+building. If the delivery width puts it below 2 px per cell, the dots will vanish on their own
+and you should do nothing — no descreen, no special kernel. If it lands at 2–4 px per cell the
+dots will be visible and soft; that is the case where σ = p/2 descreening is worth its
+1.28× edge cost. Above about 6 px per cell you are looking at a coarse screen that no filter
+recovers, and the honest move is to rescan or reshoot rather than to filter.</p>
+</div>
+
+<h2>What I could not measure, and one number I got wrong</h2>
+
+<p>The tone calibration error is stated above rather than quietly fixed: my first screen model
+printed a 0.90 tone as 0.70 at p = 2, a 51-level error, and every "tone damage" figure derived
+from it would have been dominated by that mistake. The calibrated model reproduces tone to
+0.45 levels, and the numbers above come from the calibrated run.</p>
+
+<p>Three limits remain. First, this is a <em>synthetic</em> AM screen. Real offset printing
+adds dot gain, ink spread and mechanical registration error, none of which are modelled here,
+and all of which move real prints further from their nominal tone than the resampler does.
+Second, I test a single screen angle (45°, the standard for black). A four-colour print has
+four lattices at four angles, and their mutual interference — the rosette — is the dominant
+artefact in real colour scans; a single-lattice model cannot see it. Third, the σ ≈ p/2 rule
+is fitted on four pitches, which is enough to see the trend and not enough to call it exact;
+p = 2 and p = 6 agree to within 0.1σ, but p = 8 was not run because the synthetic screen at
+that pitch produced too little contrast to measure the floor reliably.</p>
+
+<h2>Reproducing it</h2>
+
+<p>The calibration and the pitch measurement are short enough to include whole. Everything
+else is the same four functions with different loop bounds.</p>
+
+<pre><code>import numpy as np
+from PIL import Image
+
+def dots(tone, p, r, theta=45.0, aa=0.6):
+    h, w = tone.shape
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float64)
+    t = np.deg2rad(theta)
+    u, v = xx*np.cos(t) + yy*np.sin(t), -xx*np.sin(t) + yy*np.cos(t)
+    d = np.hypot(u - np.round(u/p)*p, v - np.round(v/p)*p)
+    return 255.0 * 0.5 * (1 - np.tanh((d - r)/aa))   # ink inside the dot
+
+def calibrate(p, tone, theta=45.0, aa=0.6):
+    """Bisect radius until the rendered mean matches tone*255. Without this the
+    circles overlap above 50% and print darker than asked."""
+    flat, target = np.full((192,192), tone), 255.0*tone
+    lo, hi = 0.0, p*0.85
+    for _ in range(28):
+        mid = 0.5*(lo+hi)
+        lo, hi = (mid, hi) if dots(flat, p, mid, theta, aa).mean() &lt; target else (lo, mid)
+    return 0.5*(lo+hi)
+
+def peak_freq(a):
+    x = a - a.mean()
+    win = np.hanning(a.shape[0])[:,None] * np.hanning(a.shape[1])[None,:]
+    P = np.abs(np.fft.fftshift(np.fft.fft2(x*win)))**2
+    fy = np.fft.fftshift(np.fft.fftfreq(P.shape[0]))
+    fx = np.fft.fftshift(np.fft.fftfreq(P.shape[1]))
+    FX, FY = np.meshgrid(fx, fy)
+    R = np.hypot(FX, FY)
+    band = R &gt; 0.02
+    return R[np.unravel_index(np.argmax(np.where(band, P, 0)), P.shape)]
+
+def up(a, f):
+    im = Image.fromarray(np.clip(a,0,255).astype(np.uint8), 'L')
+    return np.asarray(im.resize((int(round(a.shape[1]*f)),
+                                 int(round(a.shape[0]*f))), Image.LANCZOS)))
+
+flat = np.full((384,384), 0.5)
+for p in (2, 3, 4, 6, 8):
+    scr = dots(flat, p, calibrate(p, 0.5))
+    for F in (2, 3, 4):
+        f = peak_freq(up(scr, F))
+        print(p, F, round(f,4), round(1/(p*F),4),
+              '%+.2f%%' % (100*(f/(1/(p*F)) - 1)))</code></pre>
+
+<p>Run it and you get the +0.17 / +0.54 / &minus;0.56 pattern from the first table, because
+that pattern is the FFT's bin lattice showing through and it will do the same thing on your
+machine. If you get a different pattern, the screen or the resampler differs, and the
+difference is worth knowing about before you extrapolate any of the numbers above.</p>
+
+<p>If what you have is a <em>screen capture</em> of a document rather than a print
+photograph — one resampling already in the chain, text instead of tone — that is a different
+problem with a different measurement, and the one behind <a href="https://upgolab.com">UpgoLAB's
+upscaling work</a> covers it.</p>
+
+<nav class="sisternav" aria-label="More measured upscaling guides">
+<p>More measured guides</p>
+<ul>
+  <li><a href="https://celticgemini001.github.io/upgolab-ai-upscaler-guide/">What upscaling recovers vs invents</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-video-upscaling-limits/">Why video isn't image upscaling</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-upscale-product-photos/">Product shot vs face</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-2k-vs-4k-decision/">2K vs 4K bits-per-pixel</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-upscale-anime-illustration/">Line art and ink coverage</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-old-footage-restoration/">Old footage restoration</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-screen-recording-4k/">Screen recording to 4K</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-thumbnail-4k-master/">4K thumbnail master</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-remove-background-and-upscale/">Cutout and upscale</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-anisotropic-upscale/">Anisotropic / one-axis scale</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-chroma-subsampling/">Chroma subsampling 4:2:0</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-gamma-vs-linear-light/">Gamma vs linear light</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-bit-depth-banding/">8-bit vs 10-bit banding</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-jpeg-blocking-upscale/">JPEG blocking under upscaling</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-upscale-vs-reshoot/">Re-shoot vs upscale break-even</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-what-nofollow-means/">What rel=nofollow actually does</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-fractional-upscale-factors/">Fractional upscale factors</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-tiled-upscale-seams/">Tiled upscale seams</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-sharpen-before-or-after-upscale/">Sharpen before or after</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-output-format-after-upscale/">Output format after upscale</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-noise-and-grain-upscaling/">Noise and grain under upscaling</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-motion-blur-before-upscale/">Motion blur before upscaling</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-tools/">All measured guides (index)</a></li>
+</ul>
+</nav>
+</footer>
+</main>
+</body>
+</html>
