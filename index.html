@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Halftone Dots Under Upscaling: The Dot Lattice Scales Exactly, and Descreening Costs You 1.1–1.3× the Pitch</title>
-<meta name="description" content="A screened print carries a dot lattice at a fixed pitch. Measured across 5 pitches and 4 resamplers: the lattice frequency scales to within 0.56%, nearest-neighbour bloats fractional factors by 3.2×, and killing the dots needs a filter that blurs an edge to 1.1–1.3× the dot pitch.">
+<meta name="description" content="A screened print carries a dot lattice at a fixed pitch. Measured across 5 pitches and 4 resamplers: the lattice frequency scales to within 0.56%, nearest-neighbour bloats fractional factors by 3.2×, and killing the dots needs a filter that blurs an edge to 1.1–1.3× the dot pitch. With four colour separations the required blur rises 1.4×, and a greyscale descreen leaves 85× more chroma residue than a per-channel one.">
 <link rel="canonical" href="https://celticgemini001.github.io/upgolab-halftone-dots-upscaling/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Halftone Dots Under Upscaling: The Lattice Scales, the Detail Doesn't">
-<meta property="og:description" content="Measured: dot pitch scales exactly with the scale factor, fractional factors expose nearest-neighbour by 3.2×, and descreening to kill the dots blurs a known edge to 1.1–1.3× the dot pitch.">
+<meta property="og:description" content="Measured: dot pitch scales exactly with the scale factor, fractional factors expose nearest-neighbour by 3.2×, and descreening blurs a known edge to 1.1–1.3× the dot pitch — 1.4× more once four plates are in play.">
 <script type="application/ld+json">
 {"@type":"Article",
  "@context":"https://schema.org",
@@ -68,7 +68,10 @@ everything else in upscaling it behaves predictably: across five pitches and thr
 factors, the measured lattice frequency tracks <code>1/(p·F)</code> to within
 <strong>0.56%</strong>. What does <em>not</em> behave predictably is everything layered on
 top, and the reason is worth a number. Killing the dots with a pre-filter costs an edge
-blur equal to <strong>1.1–1.3× the dot pitch</strong>, measured at all four pitches.</p>
+blur equal to <strong>1.1–1.3× the dot pitch</strong>, measured at all four pitches.
+Add the other three colour separations and that rule under-reads the requirement by a third,
+while a greyscale descreen turns out to leave <strong>85× more chroma residue</strong> than a
+per-channel one — moving σ does not touch it.</p>
 
 <p class="meta">numpy 1.26.4 · Pillow 12.2.0 · screens synthesised as AM clustered-dot on a
 45° lattice so that ground truth is exact, then the same pipeline run on three distinct
@@ -380,6 +383,199 @@ artefact in real colour scans; a single-lattice model cannot see it. Third, the 
 is fitted on four pitches, which is enough to see the trend and not enough to call it exact;
 p = 2 and p = 6 agree to within 0.1σ, but p = 8 was not run because the synthetic screen at
 that pitch produced too little contrast to measure the floor reliably.</p>
+
+<h2>Four plates at four angles: where the single-screen model breaks</h2>
+
+<p>Everything above models one screen. A printed page has four of them, and they are not
+stacked at the same angle — that is the entire point of screening, and it is the thing the
+model above quietly assumes away. The standard set is K at 45°, M at 75°, C at 15° and Y at
+0°, chosen so that no two lattices sit close enough in orientation to beat visibly. "Close
+enough" is a number, and it is the first thing to measure.</p>
+
+<p>Two dot lattices at pitch <code>p</code> and angle difference Δθ interfere at a period
+that geometry fixes exactly:</p>
+
+<pre><code>P = p / (2·sin(Δθ/2))</code></pre>
+
+<p>Run the four plates as separate binary ink layers, composite them subtractively onto a
+50% tone, take luminance, and measure. The predicted beat frequency is present in all fifteen
+angle-pair / pitch combinations — but the pitch of the beat, in units of the screen pitch
+itself, spans a factor of nearly five:</p>
+
+<table>
+<thead><tr><th>Δθ</th><th class="num">P / p</th><th>What it means</th></tr></thead>
+<tbody>
+<tr><td>15° (C/Y)</td><td class="num">3.831</td><td>beat is 3.8× coarser than the screen — survives a mild filter</td></tr>
+<tr><td>30° (C/K, M/K)</td><td class="num">1.932</td><td>beat is 1.9× coarser — survives σ = p/2</td></tr>
+<tr><td>45° (K/Y)</td><td class="num">1.307</td><td>barely coarser than the screen</td></tr>
+<tr><td>60° (C/M)</td><td class="num">1.000</td><td><strong>degenerate</strong> — beat period equals the pitch exactly</td></tr>
+<tr><td>75° (M/Y)</td><td class="num">0.821</td><td>beat is <em>finer</em> than the screen; aliases toward Nyquist</td></tr>
+</tbody>
+</table>
+
+<p>The 60° row is not a small error, it is an identity: <code>sin(30°) = 0.5</code>, so
+P = p. At that angle the beat <em>is</em> the carrier and there is no separate frequency to
+find. That is why C and M are printed 60° apart rather than at some angle where a beat would
+appear at a period a reader could resolve — the choice removes a frequency rather than moving
+it. The 75° pair does the same thing from the other side: P/p &lt; 1 means the interference
+structure is finer than the dots producing it, so both are above the spatial frequency where
+the eye does the resolving, and both land in the same filter band.</p>
+
+<p>One honest caveat on the measurement itself. My first pass searched a window centred on
+the predicted frequency and "confirmed" it every time — circular, and worthless. Redone with
+a blind search for the strongest peak coarser than the carrier, several pairs reported
+periods 60–600% off prediction. Checking the predicted frequency directly rather than by
+argmax showed why: the true beat peak is present and enormous, but at half- and
+third-harmonics the power is larger still, because a thresholded dot is not a sinusoid and
+its harmonics do not cancel between plates. So the geometry is confirmed; "the strongest
+low-frequency feature" is a different and less useful question than "is the beat there".</p>
+
+<h2>Descreening four plates costs 1.4–1.5× the sigma, and 3.4–5.2× the residual</h2>
+
+<p>The page's earlier rule — σ = p/2 kills the dots down to a 1.9–2.5 level floor — was fitted
+on a single plate. Repeating it on the four-plate composite:</p>
+
+<table>
+<thead><tr><th>p</th><th class="num">K plate, residual at σ=p/2</th>
+<th class="num">CMYK, residual at σ=p/2</th><th class="num">Ratio</th></tr></thead>
+<tbody>
+<tr><td>3 px</td><td class="num">1.41</td><td class="num">2.18</td><td class="num">1.55×</td></tr>
+<tr><td>4 px</td><td class="num">0.71</td><td class="num">2.60</td><td class="num">3.65×</td></tr>
+<tr><td>6 px</td><td class="num">0.65</td><td class="num">3.41</td><td class="num">5.22×</td></tr>
+</tbody>
+</table>
+
+<p>σ = p/2 is still sufficient at the finest pitch and increasingly insufficient as the pitch
+grows — the wrong direction, since coarse screens are the ones you most want to descreen. The
+smallest σ that reaches a 1.0-level floor, solved by bisection rather than read off a table:</p>
+
+<table>
+<thead><tr><th>p</th><th class="num">σ needed, K only</th><th class="num">σ needed, CMYK</th>
+<th class="num">Ratio</th><th class="num">vs the p/2 rule</th></tr></thead>
+<tbody>
+<tr><td>3 px</td><td class="num">2.15</td><td class="num">2.05</td><td class="num">0.95×</td><td class="num">1.37×</td></tr>
+<tr><td>4 px</td><td class="num">1.95</td><td class="num">2.70</td><td class="num">1.38×</td><td class="num">1.35×</td></tr>
+<tr><td>6 px</td><td class="num">2.90</td><td class="num">4.30</td><td class="num">1.48×</td><td class="num">1.43×</td></tr>
+</tbody>
+</table>
+
+<p>The last column is the practical number: <strong>the σ that actually clears a colour print
+is 1.35–1.43× larger than the single-plate rule suggests</strong>, and the earlier rule was
+under-reading the requirement by roughly a third at every pitch. I am not quoting an edge
+width in pitch units for that larger σ, because the four-plate edge measurement below did not
+work. What is safe to say is that the blur is strictly more than the 1.1–1.3× the
+single-plate rule implies, and that no choice of resampling kernel afterwards recovers it.</p>
+
+<p>I did not get a clean edge-width number for the four-plate case, and the reason is worth
+recording instead of a number I do not trust. The Y screen sits at 0°, parallel to a
+horizontal step edge, so its lattice aligns with the transition rather than crossing it; the
+10–90% crossing then measures the Y plate's own dot structure, not the blur. Every run
+returned 4.00 px regardless of σ — a constant, which is how I knew it was measuring the
+lattice and not the filter. The σ ratios above come from spectral residual and are unaffected.</p>
+
+<h2>The residual is mostly chroma, and a greyscale descreen cannot see it</h2>
+
+<p>This is the part that changes what you would actually do. Each ink removes light in a
+different set of channels, so each plate's dots carry a different amount of luminance:</p>
+
+<table>
+<thead><tr><th>Plate</th><th class="num">Dot energy in luma</th><th class="num">in Cb</th>
+<th class="num">in Cr</th></tr></thead>
+<tbody>
+<tr><td>K (45°)</td><td class="num">79.91</td><td class="num">0.00</td><td class="num">0.00</td></tr>
+<tr><td>M (75°)</td><td class="num">57.15</td><td class="num">79.91</td><td class="num">79.91</td></tr>
+<tr><td>C (15°)</td><td class="num">16.99</td><td class="num">0.00</td><td class="num">79.91</td></tr>
+<tr><td>Y (0°)</td><td class="num">6.41</td><td class="num">88.73</td><td class="num">0.00</td></tr>
+</tbody>
+</table>
+
+<p>Black is pure luminance; yellow is almost pure chroma — <strong>12× less visible in luma
+than K</strong> at identical dot size. Cyan is 4.7× less visible than K. So the standard
+recipe, "convert to grey, low-pass the grey, convert back", blurs the one plate that was
+already fine and leaves three plates untouched. Measured on the four-plate composite:</p>
+
+<table>
+<thead><tr><th>p</th><th class="num">σ</th><th>Method</th>
+<th class="num">Residual, luma</th><th class="num">Residual, CbCr</th></tr></thead>
+<tbody>
+<tr><td rowspan="2">4 px</td><td class="num" rowspan="2">2.00</td><td>luma only</td><td class="num">2.60</td><td class="num">105.24</td></tr>
+<tr><td>per channel</td><td class="num">2.60</td><td class="num">5.19</td></tr>
+<tr><td rowspan="2">4 px</td><td class="num" rowspan="2">3.00</td><td>luma only</td><td class="num">0.60</td><td class="num">105.24</td></tr>
+<tr><td>per channel</td><td class="num">0.60</td><td class="num">1.24</td></tr>
+<tr><td rowspan="2">6 px</td><td class="num" rowspan="2">4.50</td><td>luma only</td><td class="num">0.78</td><td class="num">127.31</td></tr>
+<tr><td>per channel</td><td class="num">0.78</td><td class="num">1.42</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<p><strong>Luminance-only descreening leaves 85–90× more chroma residual than
+per-channel</strong>, and doubling σ does not move it at all — 105.24 at σ = 2.00, 3.00 and
+4.00, identical to two decimals, because the low-pass never touched the chroma plane. The
+luma column looks perfect the whole time. A greyscale metric scores this operation as
+clean while the page is still visibly coloured-dot-textured, which is the same failure mode
+the text-readability measurements hit: the error is real, and the metric is blind to it by
+construction.</p>
+</div>
+
+<p>Practical consequence: descreen in RGB (or in CMYK, if you have the separations), never in
+greyscale. If you only have a JPEG of a printed page, the plates are already mixed into three
+channels and per-channel low-pass is the only version that works.</p>
+
+<h2>Two things that turned out not to matter</h2>
+
+<p><strong>Upscaling after descreening does not re-amplify what descreening left.</strong> This
+was the hypothesis worth testing, because interpolation has gain above Nyquist and a residual
+at 1/(1.9p) is close to it. Measured at p = 4, four plates, residual before upscale against
+residual after 2× reported back in source-equivalent units: 6.29 → 6.34 (+0.9%) at σ = 1.00,
+0.77 → 0.77 at σ = 2.00, 0.27 → 0.26 (−1.7%) at σ = 2.70, 0.18 → 0.19 (+6.4%) at σ = 3.50.
+No systematic amplification. The filter that removed the dots already removed the energy the
+upscaler would have needed to amplify.</p>
+
+<p><strong>Tone barely matters, and what little effect there is goes the unintuitive way.</strong>
+At p = 4, four plates, σ = 2.00, the residual by tone: 10% → 0.80, 25% → 2.24, 50% → 2.60,
+75% → 1.26, 90% → 0.36. Worst at midtone, as expected from dot area peaking there — but the
+σ required to clear 1.0 is 1.90 / 2.55 / 2.70 / 2.20 / 1.20, so a 90% tint is the <em>easiest</em>
+case, not the hardest. At 90% the dots have merged into a nearly solid field with small
+holes, and a small hole is easier to filter away than a midtone checkerboard of equal-area
+dots and gaps.</p>
+
+<h2>The snippet for the four-plate part, and two traps in it</h2>
+
+<p>The screen generator and the bisection calibration are in the snippet further down and are
+unchanged. What is new is the composition and the choice of filter boundary:</p>
+
+<pre><code>ANG = {'C':15.0,'M':75.0,'Y':0.0,'K':45.0}
+INK = {'C':(1,0,0),'M':(0,1,0),'Y':(0,0,1),'K':(1,1,1)}
+
+def compose(plates, size):
+    out = []
+    for ch in range(3):                       # subtractive: each ink removes light
+        t = np.ones((size, size))
+        for name, cov in plates.items():
+            if INK[name][ch]:
+                t *= (1.0 - cov/255.0)
+        out.append(255.0 * t)
+    return np.stack(out, axis=-1)
+
+def gauss_fft(a, s):
+    """Circular Gaussian. The screen is periodic on the tile, so wrap-around is the
+    correct boundary; a padded convolution leaves an edge ramp that swamps the
+    residual you are trying to measure (my first attempt read 68 levels of it)."""
+    h, w = a.shape
+    fy = np.fft.fftfreq(h)[:, None]; fx = np.fft.fftfreq(w)[None, :]
+    H = np.exp(-2*np.pi**2 * s**2 * (fx**2 + fy**2))
+    return np.real(np.fft.ifft2(np.fft.fft2(a) * H))
+
+# descreen: per channel, never on luma alone
+D = np.stack([gauss_fft(compose(plates, 768)[..., i], 2.70) for i in range(3)], axis=-1)</code></pre>
+
+<p>Two traps that cost me a run each, both of which produced plausible-looking tables of
+zeros: the dot generator takes <code>aa</code> before <code>size</code>, so passing
+<code>size</code> positionally silently sets the edge softness to 768 and renders a flat
+field; and a padded convolution instead of a circular one leaves an edge ramp that dominates
+the residual. If a residual table comes back monotonic in σ but with a floor above 1 level,
+suspect the boundary before you suspect the physics. The generator and the pitch
+calibration are in the next section; only the composition and the filter boundary are new.</p>
 
 <h2>Reproducing it</h2>
 
